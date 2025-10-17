@@ -45,8 +45,8 @@ To get a local copy up and running, follow these simple steps.
 
 1.  **Clone the repository:**
     ```sh
-    git clone [https://github.com/your-username/projectflow.git](https://github.com/your-username/projectflow.git)
-    cd projectflow
+    git clone [https://github.com/sultanmaliki/Project-Management-Web-App.git](https://github.com/sultanmaliki/Project-Management-Web-App.git)
+    cd Project-Management-Web-App
     ```
 2.  **Frontend Setup:**
     * Navigate to the `frontend` directory.
