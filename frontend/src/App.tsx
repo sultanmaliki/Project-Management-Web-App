@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { LoginPage } from "./components/LoginPage";
 import { SignupPage } from "./components/SignupPage";
 import { ForgotPasswordPage } from "./components/ForgotPasswordPage";
@@ -25,27 +25,48 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
 
-  // --- Authentication ---
-  // This is a temporary mock login. A real app would have a /token endpoint.
-  const handleLogin = (email: string, password: string) => {
-    const demoUsers = [
-        { email: "admin@projectflow.com", password: "admin123", role: "admin" as UserRole, name: "Admin User" },
-        { email: "manager@projectflow.com", password: "manager123", role: "manager" as UserRole, name: "Project Manager" },
-        { email: "dev@projectflow.com", password: "dev123", role: "developer" as UserRole, name: "Developer" },
-    ];
-    const user = demoUsers.find(u => u.email === email && u.password === password);
+  // --- Session Persistence ---
+  useEffect(() => {
+    const storedUser = localStorage.getItem("currentUser");
+    if (storedUser) {
+      try {
+        const user = JSON.parse(storedUser);
+        setCurrentUser(user);
+        setCurrentView("dashboard");
+      } catch (error) {
+        console.error("Failed to parse user from localStorage", error);
+        localStorage.removeItem("currentUser");
+      }
+    }
+  }, []);
 
-    if (user) {
-      setCurrentUser(user);
-      setCurrentView("dashboard");
-      toast.success(`Welcome back, ${user.name}!`);
-    } else {
-      toast.error("Invalid credentials.");
+  // --- Authentication ---
+  const handleLogin = async (email: string, password: string) => {
+    try {
+      const response = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (response.ok) {
+        const user = await response.json();
+        setCurrentUser(user);
+        localStorage.setItem("currentUser", JSON.stringify(user));
+        setCurrentView("dashboard");
+        toast.success(`Welcome back, ${user.name}!`);
+      } else {
+        toast.error("Invalid credentials.");
+      }
+    } catch (error) {
+      console.error("Login failed", error);
+      toast.error("Login failed. Please try again later.");
     }
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
+    localStorage.removeItem("currentUser");
     setCurrentView("login");
   };
 
@@ -64,7 +85,6 @@ export default function App() {
 
   // --- Main Render Logic ---
   const renderMainView = () => {
-    // This function decides which main component to show after login
     switch (currentView) {
       case "dashboard":
         return <DashboardPage userRole={currentUser!.role} onProjectClick={handleProjectClick} />;
@@ -76,16 +96,16 @@ export default function App() {
         if (selectedProjectId) {
           return <ProjectDetailPage projectId={selectedProjectId} onBack={handleBack} />;
         }
-        // Fallback if no project ID is found
-        handleBack(); 
+        // Fallback if no project ID is found, schedule a state update
+        useEffect(() => {
+            handleBack();
+        }, []);
         return null;
       default:
-        // Default to dashboard if logged in
         return <DashboardPage userRole={currentUser!.role} onProjectClick={handleProjectClick} />;
     }
   };
 
-  // If no user is logged in, show the authentication pages
   if (!currentUser) {
     if (currentView === "signup") {
       return <SignupPage onBackToLogin={() => setCurrentView("login")} />;
@@ -96,7 +116,6 @@ export default function App() {
     return <LoginPage onLogin={handleLogin} onNavigateToSignup={() => setCurrentView("signup")} onNavigateToForgotPassword={() => setCurrentView("forgot-password")} />;
   }
 
-  // If a user IS logged in, show the main application layout
   return (
     <>
       <div className="flex h-screen bg-slate-50">
@@ -112,4 +131,3 @@ export default function App() {
     </>
   );
 }
-

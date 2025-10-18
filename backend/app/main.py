@@ -19,7 +19,7 @@ app = FastAPI(title="Project Management Tool API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -27,6 +27,21 @@ app.add_middleware(
 
 def get_password_hash(password):
     return pwd_context.hash(password)
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+# --- AUTH ENDPOINTS ---
+@app.post("/api/login", response_model=schemas.User, tags=["Auth"])
+def login_for_access_token(form_data: schemas.UserCreate, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.email == form_data.email).first()
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
 
 # --- USER ENDPOINTS ---
 @app.post("/users/", response_model=schemas.User, tags=["Users"])
