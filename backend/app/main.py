@@ -1,138 +1,130 @@
-from fastapi import FastAPI, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from typing import List
+import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from passlib.context import CryptContext
-import os
-from dotenv import load_dotenv
-from groq import Groq
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy import func, select
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import models, schemas
-from .database import engine, get_db
+from .config import Settings, get_settings
+from .database import Base, SessionLocal, engine
+from .models import User, UserRole
+from .routers import ai, auth, projects, tasks, users
+from .security import hash_password
 
-load_dotenv()
-models.Base.metadata.create_all(bind=engine)
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+logger = logging.getLogger("projectflow")
 
-app = FastAPI(title="Project Management Tool API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+CSP = (
+    "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+    "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 )
+DOC_PATHS = ("/docs", "/redoc", "/openapi.json")
 
-def get_password_hash(password):
-    return pwd_context.hash(password)
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
-
-# --- AUTH ENDPOINTS ---
-@app.post("/api/login", response_model=schemas.User, tags=["Auth"])
-def login_for_access_token(form_data: schemas.UserCreate, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.email == form_data.email).first()
-    if not user or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
+def ensure_bootstrap_admin(settings: Settings) -> None:
+    """Create the first administrator from BOOTSTRAP_ADMIN_* if the database has no admin yet."""
+    if not (settings.bootstrap_admin_email and settings.bootstrap_admin_password):
+        return
+    with SessionLocal() as db:
+        if db.scalar(select(func.count(User.id)).where(User.role == UserRole.admin)):
+            return
+        email = settings.bootstrap_admin_email.strip().lower()
+        if db.scalar(select(User).where(User.email == email)):
+            logger.warning("BOOTSTRAP_ADMIN_EMAIL belongs to an existing non-admin user; not creating an admin.")
+            return
+        db.add(
+            User(
+                name=settings.bootstrap_admin_name,
+                email=email,
+                role=UserRole.admin,
+                hashed_password=hash_password(settings.bootstrap_admin_password, settings.bcrypt_rounds),
+            )
         )
-    return user
+        db.commit()
+        logger.info("Created bootstrap administrator %s", email)
 
-# --- USER ENDPOINTS ---
-@app.post("/users/", response_model=schemas.User, tags=["Users"])
-def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(models.User).filter(models.User.email == user.email).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    hashed_password = get_password_hash(user.password)
-    db_user = models.User(name=user.name, email=user.email, role=user.role, hashed_password=hashed_password)
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    return db_user
 
-@app.get("/users/", response_model=List[schemas.User], tags=["Users"])
-def read_users(db: Session = Depends(get_db)):
-    return db.query(models.User).all()
+class SPAStaticFiles(StaticFiles):
+    """Serve the built frontend, falling back to index.html so client-side routes survive a refresh."""
 
-# --- PROJECT ENDPOINTS ---
-@app.post("/projects/", response_model=schemas.Project, tags=["Projects"])
-def create_project(project: schemas.ProjectCreate, db: Session = Depends(get_db)):
-    db_project = models.Project(**project.dict())
-    db.add(db_project)
-    db.commit()
-    db.refresh(db_project)
-    return db_project
+    async def get_response(self, path: str, scope):
+        # `path` is OS-normalised (backslashes on Windows), so decide using the URL path instead.
+        url_path = scope.get("path", "")
+        is_api = url_path == "/api" or url_path.startswith("/api/")
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404 or is_api:
+                raise
+            return await super().get_response("index.html", scope)
+        if response.status_code == 404 and not is_api:
+            return await super().get_response("index.html", scope)
+        return response
 
-@app.get("/projects/", response_model=List[schemas.Project], tags=["Projects"])
-def read_projects(db: Session = Depends(get_db)):
-    return db.query(models.Project).all()
 
-@app.get("/projects/{project_id}", response_model=schemas.Project, tags=["Projects"])
-def read_project(project_id: int, db: Session = Depends(get_db)):
-    db_project = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not db_project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return db_project
+def create_app(settings: Settings | None = None) -> FastAPI:
+    settings = settings or get_settings()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-@app.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Projects"])
-def delete_project(project_id: int, db: Session = Depends(get_db)):
-    db_project = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not db_project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    db.delete(db_project)
-    db.commit()
-    return
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        if settings.auto_create_tables:
+            Base.metadata.create_all(bind=engine)
+        ensure_bootstrap_admin(settings)
+        yield
 
-# --- TASK ENDPOINTS ---
-@app.post("/tasks/", response_model=schemas.Task, tags=["Tasks"])
-def create_task(task: schemas.TaskCreate, project_id: int, db: Session = Depends(get_db)):
-    db_project = db.query(models.Project).filter(models.Project.id == project_id).first()
-    if not db_project:
-        raise HTTPException(status_code=404, detail="Project not found to assign task")
-    db_task = models.Task(**task.dict(), project_id=project_id)
-    db.add(db_task)
-    db.commit()
-    db.refresh(db_task)
-    return db_task
+    app = FastAPI(
+        title="ProjectFlow API",
+        version="1.0.0",
+        lifespan=lifespan,
+        docs_url="/docs" if settings.enable_docs else None,
+        redoc_url="/redoc" if settings.enable_docs else None,
+        openapi_url="/openapi.json" if settings.enable_docs else None,
+    )
 
-@app.get("/tasks/{task_id}", response_model=schemas.Task, tags=["Tasks"])
-def read_task(task_id: int, db: Session = Depends(get_db)):
-    db_task = db.query(models.Task).filter(models.Task.id == task_id).first()
-    if not db_task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return db_task
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=False,  # auth uses a bearer header, not cookies
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
 
-@app.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Tasks"])
-def delete_task(task_id: int, db: Session = Depends(get_db)):
-    db_task = db.query(models.Task).filter(models.Task.id == task_id).first()
-    if not db_task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    db.delete(db_task)
-    db.commit()
-    return
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        if not request.url.path.startswith(DOC_PATHS):  # Swagger/ReDoc load scripts from a CDN
+            response.headers.setdefault("Content-Security-Policy", CSP)
+        if request.url.path.startswith("/api"):
+            response.headers.setdefault("Cache-Control", "no-store")
+        if settings.is_production:
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        return response
 
-# --- BONUS: AI USER STORY GENERATOR ---
-class ProjectDescription(BaseModel):
-    projectDescription: str
+    @app.exception_handler(Exception)
+    async def unhandled_exception(request: Request, exc: Exception):
+        logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+        return JSONResponse({"detail": "Internal server error"}, status_code=500)
 
-@app.post("/api/ai/generate-user-stories", tags=["AI"])
-def generate_user_stories(description: ProjectDescription):
-    try:
-        client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-        chat_completion = client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": "You are an expert user story generator..."},
-                {"role": "user", "content": description.projectDescription}
-            ],
-            model="llama3-8b-8192",
-            response_format={"type": "json_object"},
-        )
-        return chat_completion.choices[0].message.content
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    @app.get("/health", tags=["Meta"])
+    def health():
+        return {"status": "ok"}
+
+    for router in (auth.router, users.router, projects.router, tasks.router, tasks.dashboard_router, ai.router):
+        app.include_router(router)
+
+    static_dir = Path(settings.static_dir) if settings.static_dir else None
+    if static_dir and static_dir.is_dir():
+        app.mount("/", SPAStaticFiles(directory=static_dir, html=True), name="frontend")
+
+    return app
+
+
+app = create_app()
