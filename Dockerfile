@@ -9,7 +9,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ---- Stage 2: the API, serving the built frontend from the same origin -----------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.14-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     ENVIRONMENT=production \
