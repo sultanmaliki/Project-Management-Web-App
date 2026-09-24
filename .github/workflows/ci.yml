@@ -24,7 +24,7 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
@@ -55,7 +55,7 @@ jobs:
     env:
       PG_URL: postgresql://postgres:postgres@localhost:5432/projectflow_test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -85,7 +85,7 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -107,7 +107,7 @@ jobs:
       BOOTSTRAP_ADMIN_EMAIL: admin@example.com
       BOOTSTRAP_ADMIN_PASSWORD: ci-admin-password-1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Start the stack
         run: docker compose up --build -d --wait --wait-timeout 180
       - name: Health, SPA, and login through the real stack
