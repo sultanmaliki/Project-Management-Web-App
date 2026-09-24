@@ -1,142 +1,170 @@
-# ProjectFlow - A Full-Stack Project Management Tool
+# ProjectFlow
 
-![GitHub repo size](https://img.shields.io/github/repo-size/sultanmaliki/Project-Management-Web-App)
-![GitHub stars](https://img.shields.io/github/stars/sultanmaliki/Project-Management-Web-App?style=social)
-![GitHub forks](https://img.shields.io/github/forks/sultanmaliki/Project-Management-Web-App?style=social)
+[![CI](https://github.com/sultanmaliki/Project-Management-Web-App/actions/workflows/ci.yml/badge.svg)](https://github.com/sultanmaliki/Project-Management-Web-App/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-ProjectFlow is a modern, full-stack project management application designed to streamline your workflow and enhance team collaboration. With an intuitive user interface and a powerful backend, ProjectFlow provides a comprehensive solution for managing projects, tasks, and users. The application features a real-time dashboard, a Kanban-style project board, and an AI-powered user story generator to help you kickstart your projects.
+A full-stack project management app: projects, a drag-and-drop Kanban board, task assignment, role-based
+access control and an optional AI helper that drafts user stories from a project description.
 
-## ✨ Features
+- **Backend:** FastAPI · SQLAlchemy 2 · PostgreSQL (SQLite for local dev) · Alembic · JWT auth
+- **Frontend:** React 18 · TypeScript · Vite · Tailwind CSS v4 · shadcn/ui · React Router
 
-*   **Dashboard Overview:** Get a quick glance at your projects, tasks, and team statistics.
-*   **Kanban-Style Project Board:** Visualize your workflow with a drag-and-drop interface for managing tasks.
-*   **User and Role Management:** Assign roles to users (Admin, Manager, Developer) to control permissions and access.
-*   **AI-Powered User Story Generator:** Automatically generate user stories from a project description to save time and effort.
-*   **Responsive Design:** Access and manage your projects on any device, thanks to a fully responsive layout.
-*   **Modern Tech Stack:** Built with a modern and robust tech stack, ensuring a high-performance and scalable application.
+## Features
 
-## 🛠️ Tech Stack
+- **Authentication** – email + password sign-in with signed, expiring JWT access tokens. Passwords are hashed with
+  bcrypt. Sessions survive a page refresh and end automatically when a token expires or the account is deactivated.
+- **Roles & permissions** – `admin`, `manager` and `developer`, enforced **on the API** (the UI only mirrors it).
+- **Projects & Kanban board** – create/edit/delete projects; tasks flow across *To Do → In Progress → Done* by drag and
+  drop (or from the task dialog). Progress and team are derived from the tasks.
+- **Tasks** – title, description, status, priority, deadline and assignee. Overdue tasks are highlighted.
+- **Dashboard** – live task counts (total / in progress / overdue). Managers see recent projects; developers see their
+  own active tasks.
+- **User management** – admins create, edit, deactivate, reset passwords for and delete users. The last active admin
+  can't be removed or demoted.
+- **AI user stories** – managers can generate user stories from a description (Groq) and add the ones they like as tasks.
+  Optional: it is disabled until `GROQ_API_KEY` is set.
+- **Responsive** – sidebar on desktop, compact top bar on phones.
 
-### Frontend
+### Who can do what
 
-*   **React:** A JavaScript library for building user interfaces.
-*   **Vite:** A fast and modern build tool for web development.
-*   **TypeScript:** A statically typed superset of JavaScript that adds optional types.
-*   **Tailwind CSS:** A utility-first CSS framework for rapid UI development.
-*   **shadcn/ui:** A collection of re-usable components built with Radix UI and Tailwind CSS.
-*   **Lucide React:** A library of beautiful and consistent icons.
-*   **Recharts:** A composable charting library built on React components.
+| | Admin | Manager | Developer |
+|---|:---:|:---:|:---:|
+| See projects | all | all | only those with a task assigned to them |
+| Create / edit projects | ✅ | ✅ | – |
+| Delete a project | ✅ any | ✅ own | – |
+| Create / edit / delete / assign tasks | ✅ | ✅ | – |
+| Change a task's status | ✅ | ✅ | ✅ only tasks assigned to them |
+| Generate AI user stories | ✅ | ✅ | – |
+| List users (to assign work) | ✅ | ✅ | – |
+| Create / edit / delete users | ✅ | – | – |
 
-### Backend
+Self-service sign-up always creates a **developer**. Only an admin can grant a higher role.
 
-*   **FastAPI:** A modern, fast (high-performance) web framework for building APIs with Python.
-*   **PostgreSQL:** A powerful, open-source object-relational database system.
-*   **SQLAlchemy:** A SQL toolkit and Object-Relational Mapper (ORM) for Python.
-*   **Groq:** An AI-powered service used for generating user stories.
-*   **Passlib:** A password hashing library for Python.
+## Quick start (local development)
 
-## 🚀 Getting Started
+Requirements: Python 3.11+ and Node.js 20.19+ (22 recommended). No database server is needed — development defaults to
+a local SQLite file.
 
-To get a local copy up and running, follow these simple steps.
+**1. Backend**
 
-### Prerequisites
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt
+cp .env.example .env                 # optional: the defaults work for development
+python -m app.seed                   # optional: demo users + a sample project
+uvicorn app.main:app --reload        # http://127.0.0.1:8000  (API docs at /docs)
+```
 
-You need to have Node.js, Python, and PostgreSQL installed on your system. Here’s how you can install them on different operating systems:
+The seed script prints the demo accounts (all use the password `demo-password-1`). It refuses to run when
+`ENVIRONMENT=production`. Without it, set `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` in `backend/.env` and
+an admin is created on startup.
 
-#### Node.js
+**2. Frontend** (in a second terminal)
 
-*   **All Systems:** Download the installer from the official [Node.js website](https://nodejs.org/).
+```bash
+cd frontend
+npm install
+npm run dev                          # http://localhost:5173 (proxies /api to the backend)
+```
 
-#### Python
+## Run with Docker (PostgreSQL + app)
 
-*   **All Systems:** Download the installer from the official [Python website](https://www.python.org/downloads/).
+```bash
+cp .env.example .env                 # set POSTGRES_PASSWORD, SECRET_KEY and the bootstrap admin
+docker compose up --build
+```
 
-#### PostgreSQL
+Open <http://localhost:8000>. The image builds the frontend and serves it from the API, so everything is one
+origin (no CORS setup). Migrations run automatically on start. Put a TLS-terminating reverse proxy in front for any
+real deployment.
 
-*   **macOS (using Homebrew):**
-    ```sh
-    brew install postgresql
-    ```
-*   **Linux (using apt on Debian/Ubuntu):**
-    ```sh
-    sudo apt update
-    sudo apt install postgresql postgresql-contrib
-    ```
-*   **Windows:** Download the installer from the official [PostgreSQL website](https://www.enterprisedb.com/downloads/postgres-postgresql-downloads).
+## Configuration
 
-### Installation & Setup
+Settings are read from environment variables (or `backend/.env`). See [`backend/.env.example`](backend/.env.example).
 
-1.  **Clone the repository:**
-    ```sh
-    git clone https://github.com/sultanmaliki/Project-Management-Web-App.git
-    cd Project-Management-Web-App
-    ```
+| Variable | Default | Notes |
+|---|---|---|
+| `ENVIRONMENT` | `development` | `production` requires `SECRET_KEY`, disables `/docs`, enables HSTS. |
+| `DATABASE_URL` | `sqlite:///./projectflow.db` | Use PostgreSQL in production: `postgresql://user:pass@host/db`. |
+| `SECRET_KEY` | *(random per start in dev)* | ≥ 32 chars in production. Changing it signs everyone out. |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `60` | Token lifetime. |
+| `ALLOW_SIGNUP` | `true` | `false` hides sign-up; admins can still add users. |
+| `BOOTSTRAP_ADMIN_EMAIL` / `_PASSWORD` | – | Creates the first admin on startup if none exists. |
+| `CORS_ORIGINS` | localhost dev origins | JSON list. Only needed if the frontend is on another origin. |
+| `GROQ_API_KEY` / `GROQ_MODEL` | – / `llama-3.1-8b-instant` | Enables the AI user-story generator. |
+| `STATIC_DIR` | – | Directory of the built frontend to serve (set in the Docker image). |
 
-2.  **Frontend Setup:**
-    *   Navigate to the `frontend` directory:
-        ```sh
-        cd frontend
-        ```
-    *   Install the dependencies:
-        ```sh
-        npm install
-        ```
-    *   Start the development server:
-        ```sh
-        npm run dev
-        ```
+Database schema changes are managed with Alembic (`cd backend && alembic upgrade head`). In development the tables are
+created automatically; in production use the migration.
 
-3.  **Backend Setup:**
-    *   Navigate to the `backend` directory:
-        ```sh
-        cd backend
-        ```
-    *   Create a virtual environment:
-        ```sh
-        python -m venv venv
-        ```
-    *   Activate the virtual environment:
-        *   **macOS/Linux:**
-            ```sh
-            source venv/bin/activate
-            ```
-        *   **Windows:**
-            ```sh
-            venv\Scripts\activate
-            ```
-    *   Install the dependencies:
-        ```sh
-        pip install -r requirements.txt
-        ```
-    *   Set up your environment variables by creating a `.env` file in the `backend` directory and adding your Groq API key:
-        ```
-        GROQ_API_KEY="your-groq-api-key"
-        ```
-    *   Start the backend server:
-        ```sh
-        uvicorn app.main:app --reload
-        ```
+## Testing
 
-### Usage
+```bash
+cd backend  && pytest --cov=app        # 191 tests, ~99% line coverage
+cd frontend && npm test                # 76 tests
+cd frontend && npm run lint && npm run typecheck && npm run build
+```
 
-Once both the frontend and backend servers are running, you can access the application at `http://localhost:5173`.
+The backend tests run on in-memory SQLite by default; set `TEST_DATABASE_URL` to run them on PostgreSQL. CI
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs lint, type-checks, both test suites (including the backend
+on a real PostgreSQL), verifies the Alembic migration, and boots the production Docker stack end to end.
 
-Here are the default credentials for different roles:
+The tests deliberately cover the security rules: role checks, developer-only-own-tasks, last-admin protection, expired
+and forged tokens, SQL-injection and XSS payloads, rate limits and input bounds.
 
-*   **Admin:** `admin@projectflow.com` / `admin123`
-*   **Manager:** `manager@projectflow.com` / `manager123`
-*   **Developer:** `dev@projectflow.com` / `dev123`
+## API overview
 
-## 🤝 Contributing
+Interactive docs are at `/docs` in development. Everything except sign-in/up and `/health` needs
+`Authorization: Bearer <token>`.
 
-Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
+| Area | Endpoints |
+|---|---|
+| Auth | `POST /api/auth/login`, `POST /api/auth/signup`, `GET /api/auth/me`, `POST /api/auth/change-password`, `GET /api/auth/config` |
+| Projects | `GET/POST /api/projects`, `GET/PATCH/DELETE /api/projects/{id}`, `POST /api/projects/{id}/tasks` |
+| Tasks | `GET /api/tasks/mine`, `GET/PATCH/DELETE /api/tasks/{id}` |
+| Users | `GET/POST /api/users`, `GET/PATCH/DELETE /api/users/{id}` |
+| Dashboard | `GET /api/dashboard` |
+| AI | `POST /api/ai/user-stories` |
+| Health | `GET /health` |
 
-1.  Fork the Project
-2.  Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3.  Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4.  Push to the Branch (`git push origin feature/AmazingFeature`)
-5.  Open a Pull Request
+## Security notes
 
-## 📜 License
+Built in: bcrypt password hashing with a constant-work login path, signed expiring JWTs re-checked against the database
+on every request (so deactivation and role changes apply immediately), server-side authorization on every route,
+input validation and length limits, bounded IDs, parameterised queries, rate limiting on login/sign-up/AI, strict
+CORS, security headers (CSP, `X-Frame-Options`, `nosniff`, HSTS in production), generic error messages that never leak
+internals, no secrets in the repository, and a non-root container.
 
-Distributed under the MIT License. See `LICENSE` for more information.
+Known limitations to be aware of before exposing it publicly:
+
+- **Rate limiting is in-memory and per process.** Behind several workers/replicas the effective limit is higher; use a
+  shared store or your proxy's limiter. If you're behind a reverse proxy, set uvicorn's `FORWARDED_ALLOW_IPS` so client
+  IPs are read correctly.
+- **The access token is kept in `localStorage`** so sessions survive a refresh. That's the usual SPA trade-off: an XSS bug
+  could read it. The UI renders no untrusted HTML and ships a strict CSP to reduce that risk. There are no refresh tokens
+  or server-side token revocation; tokens simply expire (default 60 min).
+- **No email-based password reset.** Admins reset passwords from the Users page; users can change their own password.
+- Migrations run on container start, which is fine for one instance; with several replicas run `alembic upgrade head`
+  as a separate step.
+
+To report a vulnerability see [SECURITY.md](SECURITY.md).
+
+## Project structure
+
+```
+backend/
+  app/            FastAPI app: config, models, schemas, security, deps, routers/, seed
+  alembic/        database migrations
+  tests/          pytest suite
+frontend/
+  src/lib/        typed API client, date helpers, data-loading hook
+  src/context/    authentication context
+  src/components/ pages, dialogs and shadcn/ui primitives (components/ui)
+Dockerfile, docker-compose.yml, .github/workflows/ci.yml
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE). UI primitives are from [shadcn/ui](https://ui.shadcn.com/) (MIT).
