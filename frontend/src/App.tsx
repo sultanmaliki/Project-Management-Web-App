@@ -1,132 +1,73 @@
-import { useState, useEffect } from "react";
-import { LoginPage } from "./components/LoginPage";
-import { SignupPage } from "./components/SignupPage";
-import { ForgotPasswordPage } from "./components/ForgotPasswordPage";
+import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { DashboardPage } from "./components/DashboardPage";
-import { ProjectsPage } from "./components/ProjectsPage";
+import { Layout } from "./components/Layout";
+import { LoginPage } from "./components/LoginPage";
+import { NotFoundPage } from "./components/NotFoundPage";
 import { ProjectDetailPage } from "./components/ProjectDetailPage";
+import { ProjectsPage } from "./components/ProjectsPage";
+import { SignupPage } from "./components/SignupPage";
 import { UsersPage } from "./components/UsersPage";
-import { Navbar } from "./components/Navbar";
 import { Toaster } from "./components/ui/sonner";
-import { toast } from "sonner";
+import { useAuth } from "./context/AuthContext";
+import type { Role } from "./lib/types";
 
-// Define TypeScript types to be used across the app
-type UserRole = "admin" | "manager" | "developer";
-type View = "login" | "signup" | "forgot-password" | "dashboard" | "projects" | "users" | "project-detail";
+function FullPageSpinner() {
+  return (
+    <div className="min-h-screen flex items-center justify-center text-slate-500" role="status">
+      Loading…
+    </div>
+  );
+}
 
-interface User {
-  email: string;
-  role: UserRole;
-  name: string;
+/** Only signed-in users get past this; everyone else is sent to the login screen (and back afterwards). */
+function RequireAuth() {
+  const { user, initializing, loggedOut } = useAuth();
+  const location = useLocation();
+  if (initializing) return <FullPageSpinner />;
+  // Remember where an unauthenticated visitor was headed, but not after a deliberate logout.
+  if (!user) return <Navigate to="/login" replace state={loggedOut ? undefined : { from: location.pathname }} />;
+  return <Outlet />;
+}
+
+/** Client-side convenience only: the API enforces the same rules and is the real gatekeeper. */
+function RequireRole({ roles }: { roles: Role[] }) {
+  const { user } = useAuth();
+  if (!user || !roles.includes(user.role)) return <Navigate to="/" replace />;
+  return <Outlet />;
+}
+
+function PublicOnly() {
+  const { user, initializing } = useAuth();
+  const location = useLocation();
+  if (initializing) return <FullPageSpinner />;
+  if (user) {
+    const from = (location.state as { from?: string } | null)?.from;
+    return <Navigate to={from ?? "/"} replace />;
+  }
+  return <Outlet />;
 }
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<View>("login");
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-
-  // --- Session Persistence ---
-  useEffect(() => {
-    const storedUser = localStorage.getItem("currentUser");
-    if (storedUser) {
-      try {
-        const user = JSON.parse(storedUser);
-        setCurrentUser(user);
-        setCurrentView("dashboard");
-      } catch (error) {
-        console.error("Failed to parse user from localStorage", error);
-        localStorage.removeItem("currentUser");
-      }
-    }
-  }, []);
-
-  // --- Authentication ---
-  const handleLogin = async (email: string, password: string) => {
-    try {
-      const response = await fetch("/api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (response.ok) {
-        const user = await response.json();
-        setCurrentUser(user);
-        localStorage.setItem("currentUser", JSON.stringify(user));
-        setCurrentView("dashboard");
-        toast.success(`Welcome back, ${user.name}!`);
-      } else {
-        toast.error("Invalid credentials.");
-      }
-    } catch (error) {
-      console.error("Login failed", error);
-      toast.error("Login failed. Please try again later.");
-    }
-  };
-
-  const handleLogout = () => {
-    setCurrentUser(null);
-    localStorage.removeItem("currentUser");
-    setCurrentView("login");
-  };
-
-  // --- Navigation ---
-  const handleNavigate = (view: View) => setCurrentView(view);
-
-  const handleProjectClick = (projectId: string) => {
-    setSelectedProjectId(projectId);
-    setCurrentView("project-detail");
-  };
-
-  const handleBack = () => {
-    setSelectedProjectId(null);
-    setCurrentView("dashboard");
-  };
-
-  // --- Main Render Logic ---
-  const renderMainView = () => {
-    switch (currentView) {
-      case "dashboard":
-        return <DashboardPage userRole={currentUser!.role} onProjectClick={handleProjectClick} />;
-      case "projects":
-        return <ProjectsPage userRole={currentUser!.role} onProjectClick={handleProjectClick} />;
-      case "users":
-        return <UsersPage />;
-      case "project-detail":
-        if (selectedProjectId) {
-          return <ProjectDetailPage projectId={selectedProjectId} onBack={handleBack} />;
-        }
-        // Fallback if no project ID is found, schedule a state update
-        useEffect(() => {
-            handleBack();
-        }, []);
-        return null;
-      default:
-        return <DashboardPage userRole={currentUser!.role} onProjectClick={handleProjectClick} />;
-    }
-  };
-
-  if (!currentUser) {
-    if (currentView === "signup") {
-      return <SignupPage onBackToLogin={() => setCurrentView("login")} />;
-    }
-    if (currentView === "forgot-password") {
-      return <ForgotPasswordPage onBackToLogin={() => setCurrentView("login")} />;
-    }
-    return <LoginPage onLogin={handleLogin} onNavigateToSignup={() => setCurrentView("signup")} onNavigateToForgotPassword={() => setCurrentView("forgot-password")} />;
-  }
-
   return (
     <>
-      <div className="flex h-screen bg-slate-50">
-        <Navbar
-          activeView={currentView}
-          onNavigate={(view) => handleNavigate(view as View)}
-          userRole={currentUser.role}
-          onLogout={handleLogout}
-        />
-        {renderMainView()}
-      </div>
+      <Routes>
+        <Route element={<PublicOnly />}>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
+        </Route>
+
+        <Route element={<RequireAuth />}>
+          <Route element={<Layout />}>
+            <Route index element={<DashboardPage />} />
+            <Route path="projects" element={<ProjectsPage />} />
+            <Route path="projects/:projectId" element={<ProjectDetailPage />} />
+            <Route element={<RequireRole roles={["admin"]} />}>
+              <Route path="users" element={<UsersPage />} />
+            </Route>
+            <Route path="*" element={<NotFoundPage />} />
+          </Route>
+        </Route>
+      </Routes>
       <Toaster position="top-right" />
     </>
   );
