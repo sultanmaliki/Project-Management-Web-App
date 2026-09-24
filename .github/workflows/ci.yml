@@ -101,25 +101,30 @@ jobs:
     name: Docker image boots and serves the app
     runs-on: ubuntu-latest
     needs: [backend, frontend]
+    env:  # compose needs these for every command (up, logs, down)
+      POSTGRES_PASSWORD: ci_postgres_password
+      SECRET_KEY: ci-only-secret-key-ci-only-secret-key-0123456789
+      BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+      BOOTSTRAP_ADMIN_PASSWORD: ci-admin-password-1
     steps:
       - uses: actions/checkout@v4
       - name: Start the stack
-        env:
-          POSTGRES_PASSWORD: ci_postgres_password
-          SECRET_KEY: ci-only-secret-key-ci-only-secret-key-0123456789
-          BOOTSTRAP_ADMIN_EMAIL: admin@example.com
-          BOOTSTRAP_ADMIN_PASSWORD: ci-admin-password-1
         run: docker compose up --build -d --wait --wait-timeout 180
       - name: Health, SPA, and login through the real stack
         run: |
           curl -fsS http://localhost:8000/health
           curl -fsS http://localhost:8000/ | grep -q '<div id="root">'
-          curl -fsS http://localhost:8000/projects/1 | grep -q '<div id="root">'
+          curl -fsS http://localhost:8000/projects/1 | grep -q '<div id="root">'   # client-side route survives a refresh
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/projects)" = "401"
-          TOKEN=$(curl -fsS -X POST http://localhost:8000/api/auth/login -H 'Content-Type: application/json' \
-            -d '{"email":"admin@example.com","password":"ci-admin-password-1"}' | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/nope)" = "404"
+          TOKEN=$(curl -fsS -X POST http://localhost:8000/api/auth/login -H 'Content-Type: application/json'             -d '{"email":"admin@example.com","password":"ci-admin-password-1"}' | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
           curl -fsS http://localhost:8000/api/projects -H "Authorization: Bearer $TOKEN"
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/docs)" = "404"   # docs are off in production
+          # API docs must be off in production (the path falls through to the SPA, which is fine; Swagger/OpenAPI is not)
+          if curl -fsS http://localhost:8000/openapi.json | grep -q '"openapi"'; then echo "OpenAPI schema is exposed in production"; exit 1; fi
+          if curl -fsS http://localhost:8000/docs | grep -qi swagger; then echo "Swagger UI is exposed in production"; exit 1; fi
       - name: Logs on failure
         if: failure()
         run: docker compose logs --no-color
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
